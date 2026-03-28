@@ -5,13 +5,41 @@ pub enum IntentTag {
     MemoryLow,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OpCode {
+    // Arithmetic
     Add,
-    Return,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Neg,
+
+    // Comparison (result: 1 = true, 0 = false)
+    CmpEq,   // ==
+    CmpNe,   // !=
+    CmpLt,   // <
+    CmpLe,   // <=
+    CmpGt,   // >
+    CmpGe,   // >=
+
+    // Control flow
+    Jump,          // unconditional jump to label
+    Branch,        // conditional branch: if operand != 0, jump to label
+    Label,         // marks a jump target
+
+    // Data movement
     LoadConst,
     LoadVar,
     StoreVar,
+    Copy,          // copy value from one var to another
+
+    // Function
+    Call,          // call function with args
+    Return,
+
+    // No-op (for optimization placeholders)
+    Nop,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +58,7 @@ pub struct Instruction {
 
 #[derive(Debug, Clone)]
 pub struct BasicBlock {
+    pub label: Option<String>,  // optional label for jump targets
     pub instructions: Vec<Instruction>,
 }
 
