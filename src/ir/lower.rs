@@ -53,7 +53,7 @@ impl Lowerer {
                     operands: vec![val],
                     result: Some(name),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
             }
 
@@ -65,7 +65,7 @@ impl Lowerer {
                     operands: vec![val],
                     result: Some(name),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
             }
 
@@ -77,7 +77,7 @@ impl Lowerer {
                     operands: vec![val],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
             }
 
@@ -95,7 +95,7 @@ impl Lowerer {
                     operands: vec![loop_start.clone()],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Evaluate condition
@@ -108,7 +108,7 @@ impl Lowerer {
                     operands: vec![cond, "0".to_string()],
                     result: Some(not_cond.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 instructions.push(Instruction {
@@ -116,7 +116,7 @@ impl Lowerer {
                     operands: vec![not_cond, loop_end.clone()],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Body
@@ -130,7 +130,7 @@ impl Lowerer {
                     operands: vec![loop_start],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Label: loop_end
@@ -139,7 +139,7 @@ impl Lowerer {
                     operands: vec![loop_end],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
             }
 
@@ -154,7 +154,7 @@ impl Lowerer {
                     operands: vec![start_val],
                     result: Some(var.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Store end value
@@ -165,7 +165,7 @@ impl Lowerer {
                     operands: vec![end_val],
                     result: Some(end_var.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Label: loop_start
@@ -174,7 +174,7 @@ impl Lowerer {
                     operands: vec![loop_start.clone()],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Check if var < end
@@ -184,7 +184,7 @@ impl Lowerer {
                     operands: vec![var.clone(), end_var],
                     result: Some(cmp_result.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Branch to end if not (cmp_result == 0)
@@ -194,7 +194,7 @@ impl Lowerer {
                     operands: vec![cmp_result, "0".to_string()],
                     result: Some(not_cond.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 instructions.push(Instruction {
@@ -202,7 +202,7 @@ impl Lowerer {
                     operands: vec![not_cond, loop_end.clone()],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Body
@@ -217,7 +217,7 @@ impl Lowerer {
                     operands: vec![var.clone(), "1".to_string()],
                     result: Some(inc_result.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 instructions.push(Instruction {
@@ -225,7 +225,7 @@ impl Lowerer {
                     operands: vec![inc_result],
                     result: Some(var),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Jump back to start
@@ -234,7 +234,7 @@ impl Lowerer {
                     operands: vec![loop_start],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Label: loop_end
@@ -243,7 +243,7 @@ impl Lowerer {
                     operands: vec![loop_end],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
             }
 
@@ -261,7 +261,7 @@ impl Lowerer {
                     operands: vec![cond, "0".to_string()],
                     result: Some(not_cond.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 instructions.push(Instruction {
@@ -269,7 +269,7 @@ impl Lowerer {
                     operands: vec![not_cond, else_label.clone()],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Then body
@@ -283,7 +283,7 @@ impl Lowerer {
                     operands: vec![end_label.clone()],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Else label
@@ -292,7 +292,7 @@ impl Lowerer {
                     operands: vec![else_label],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 // Else body
@@ -308,7 +308,7 @@ impl Lowerer {
                     operands: vec![end_label],
                     result: None,
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
             }
         }
@@ -324,7 +324,7 @@ impl Lowerer {
                     operands: vec![n.to_string()],
                     result: Some(temp.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 temp
@@ -358,7 +358,7 @@ impl Lowerer {
                     operands: vec![l, r],
                     result: Some(temp.clone()),
                     intents: vec![],
-                    profile: ProfileData { exec_count: 0 },
+                    profile: ProfileData::new(),
                 });
 
                 temp
