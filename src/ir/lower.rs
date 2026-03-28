@@ -21,7 +21,10 @@ impl Lowerer {
             Self::lower_stmt(stmt, &mut instructions);
         }
 
-        let block = BasicBlock { instructions };
+        let block = BasicBlock {
+            label: Some(format!("{}_entry", func.name)),
+            instructions,
+        };
 
         FunctionIR {
             name: func.name,
@@ -57,7 +60,9 @@ impl Lowerer {
                 });
             }
 
-            _ => {}
+            Stmt::Expr(expr) => {
+                Self::lower_expr(expr, instructions);
+            }
         }
     }
 
@@ -79,14 +84,29 @@ impl Lowerer {
 
             Expr::Identifier(name) => name,
 
-            Expr::Binary { left, op: _, right } => {
+            Expr::Binary { left, op, right } => {
                 let l = Self::lower_expr(*left, instructions);
                 let r = Self::lower_expr(*right, instructions);
 
                 let temp = format!("t{}", instructions.len());
 
+                let opcode = match op.as_str() {
+                    "+" => OpCode::Add,
+                    "-" => OpCode::Sub,
+                    "*" => OpCode::Mul,
+                    "/" => OpCode::Div,
+                    "%" => OpCode::Mod,
+                    "==" => OpCode::CmpEq,
+                    "!=" => OpCode::CmpNe,
+                    "<" => OpCode::CmpLt,
+                    "<=" => OpCode::CmpLe,
+                    ">" => OpCode::CmpGt,
+                    ">=" => OpCode::CmpGe,
+                    _ => OpCode::Add, // fallback
+                };
+
                 instructions.push(Instruction {
-                    opcode: OpCode::Add,
+                    opcode,
                     operands: vec![l, r],
                     result: Some(temp.clone()),
                     intents: vec![],

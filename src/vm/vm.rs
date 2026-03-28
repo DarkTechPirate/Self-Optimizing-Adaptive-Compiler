@@ -56,15 +56,107 @@ impl NyxVM {
             OpCode::Add => {
                 let a = self.get_value(&instr.operands[0]);
                 let b = self.get_value(&instr.operands[1]);
-
                 if let Some(name) = &instr.result {
                     self.variables.insert(name.clone(), a + b);
                 }
             }
 
+            OpCode::Sub => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), a - b);
+                }
+            }
+
+            OpCode::Mul => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), a * b);
+                }
+            }
+
+            OpCode::Div => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if b != 0 { a / b } else { 0 });
+                }
+            }
+
+            OpCode::Mod => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if b != 0 { a % b } else { 0 });
+                }
+            }
+
+            OpCode::Neg => {
+                let a = self.get_value(&instr.operands[0]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), -a);
+                }
+            }
+
+            OpCode::CmpEq => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if a == b { 1 } else { 0 });
+                }
+            }
+
+            OpCode::CmpNe => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if a != b { 1 } else { 0 });
+                }
+            }
+
+            OpCode::CmpLt => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if a < b { 1 } else { 0 });
+                }
+            }
+
+            OpCode::CmpLe => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if a <= b { 1 } else { 0 });
+                }
+            }
+
+            OpCode::CmpGt => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if a > b { 1 } else { 0 });
+                }
+            }
+
+            OpCode::CmpGe => {
+                let a = self.get_value(&instr.operands[0]);
+                let b = self.get_value(&instr.operands[1]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), if a >= b { 1 } else { 0 });
+                }
+            }
+
             OpCode::StoreVar => {
                 let val = self.get_value(&instr.operands[0]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), val);
+                }
+            }
 
+            OpCode::Copy => {
+                let val = self.get_value(&instr.operands[0]);
                 if let Some(name) = &instr.result {
                     self.variables.insert(name.clone(), val);
                 }
@@ -75,7 +167,20 @@ impl NyxVM {
                 println!("Program returned: {}", val);
             }
 
-            OpCode::LoadVar => {}
+            // Control flow opcodes (Jump, Branch, Label) need block-level execution
+            // For now, they are no-ops in single-block execution
+            OpCode::Jump | OpCode::Branch | OpCode::Label | OpCode::Nop => {}
+
+            OpCode::LoadVar => {
+                let val = self.get_value(&instr.operands[0]);
+                if let Some(name) = &instr.result {
+                    self.variables.insert(name.clone(), val);
+                }
+            }
+
+            OpCode::Call => {
+                // Function calls to be implemented later
+            }
         }
     }
 
