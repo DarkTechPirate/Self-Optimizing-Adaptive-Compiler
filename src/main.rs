@@ -28,6 +28,7 @@ fn main() {
     println!("1. Compiling source code...");
     let compile_result = compiler.compile(source);
     println!("   Compile success: {}", compile_result.success);
+    println!("   Instructions: {}", compile_result.instruction_count);
 
     // Step 2: Execute (before optimization)
     println!("\n2. Executing (unoptimized)...");
@@ -39,23 +40,24 @@ fn main() {
     println!("\n3. Optimizing...");
     let opt_result = compiler.optimize();
     println!("   Optimizations: {:?}", opt_result.optimizations_applied);
-    println!("   Instructions: {} -> {}", opt_result.instructions_before, opt_result.instructions_after);
+    println!("   Instructions: {} -> {} (-{})", 
+        opt_result.instructions_before, 
+        opt_result.instructions_after,
+        opt_result.instructions_removed);
 
     // Step 4: Execute again (optimized)
     println!("\n4. Executing (optimized)...");
     let exec_result2 = compiler.execute();
     println!("   Return value: {:?}", exec_result2.return_value);
-    println!("   Instructions executed: {}", exec_result2.total_instructions);
+    println!("   Time: {}μs", exec_result2.total_time_us);
     println!("   Hot instructions: {}", exec_result2.hot_instruction_count);
 
     // Step 5: Get profile
-    println!("\n5. Profiling...");
-    let profile = compiler.profile();
-    println!("   Total time: {}μs", profile.total_time_ns / 1000);
-    println!("   Hot instructions: {}", profile.hot_count);
+    println!("\n5. Analysis...");
+    let analysis = compiler.analyze();
+    println!("   Hot instructions: {:?}", analysis.hot_instructions);
 
-    // Using convenience functions
-    println!("\n=== Using Convenience Functions ===");
-    let result = api::execute(source);
-    println!("api::execute() returned: {:?}", result.return_value);
+    // JSON Output for LLM
+    println!("\n=== JSON Output (for LLM) ===");
+    println!("{}", api::run_json(source));
 }

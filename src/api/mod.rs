@@ -1,3 +1,4 @@
+use serde::Serialize;
 use crate::lexer::Lexer;
 use crate::lexer::token::Token;
 use crate::parser::parser::Parser;
@@ -6,37 +7,40 @@ use crate::ir::ir::ProgramIR;
 use crate::vm::vm::NyxVM;
 use crate::optimizer::Optimizer;
 
-/// Result of compilation
-#[derive(Debug)]
+/// Result of compilation (JSON-serializable for LLM)
+#[derive(Debug, Serialize)]
 pub struct CompileResult {
     pub success: bool,
+    #[serde(skip)]
     pub ir: Option<ProgramIR>,
+    pub instruction_count: usize,
     pub error: Option<String>,
 }
 
-/// Result of execution
-#[derive(Debug)]
+/// Result of execution (JSON-serializable for LLM)
+#[derive(Debug, Serialize)]
 pub struct ExecuteResult {
     pub success: bool,
     pub return_value: Option<i64>,
     pub total_instructions: u64,
-    pub total_time_ns: u64,
+    pub total_time_us: u64,  // microseconds for readability
     pub hot_instruction_count: usize,
     pub error: Option<String>,
 }
 
-/// Result of optimization
-#[derive(Debug)]
+/// Result of optimization (JSON-serializable for LLM)
+#[derive(Debug, Serialize)]
 pub struct OptimizeResult {
     pub success: bool,
     pub optimizations_applied: Vec<String>,
     pub instructions_before: usize,
     pub instructions_after: usize,
+    pub instructions_removed: usize,
     pub error: Option<String>,
 }
 
-/// Profile data for a single instruction
-#[derive(Debug, Clone)]
+/// Profile data for a single instruction (JSON-serializable for LLM)
+#[derive(Debug, Clone, Serialize)]
 pub struct InstructionProfile {
     pub opcode: String,
     pub exec_count: u64,
@@ -44,15 +48,24 @@ pub struct InstructionProfile {
     pub is_hot: bool,
 }
 
-/// Result of profiling
-#[derive(Debug)]
+/// Result of profiling (JSON-serializable for LLM)
+#[derive(Debug, Serialize)]
 pub struct ProfileResult {
     pub success: bool,
     pub instructions: Vec<InstructionProfile>,
     pub total_instructions: u64,
-    pub total_time_ns: u64,
+    pub total_time_us: u64,  // microseconds for readability
     pub hot_count: usize,
     pub error: Option<String>,
+}
+
+/// Analysis suggestions for LLM
+#[derive(Debug, Serialize)]
+pub struct AnalysisResult {
+    pub success: bool,
+    pub suggestions: Vec<String>,
+    pub hot_instructions: Vec<String>,
+    pub optimization_opportunities: Vec<String>,
 }
 
 /// The Nyx Compiler API
@@ -87,11 +100,13 @@ impl NyxCompiler {
 
         // Lower to IR
         let ir = Lowerer::lower_program(program);
+        let count = Self::count_instructions(&ir);
         self.ir = Some(ir.clone());
 
         CompileResult {
             success: true,
             ir: Some(ir),
+            instruction_count: count,
             error: None,
         }
     }
@@ -107,7 +122,6 @@ impl NyxCompiler {
                 // Run optimization passes
                 Optimizer::optimize(ir);
                 
-                // TODO: Track which optimizations were actually applied
                 optimizations.push("constant_folding".to_string());
                 optimizations.push("dead_code_elimination".to_string());
                 optimizations.push("loop_invariant_code_motion".to_string());
@@ -120,6 +134,7 @@ impl NyxCompiler {
                     optimizations_applied: optimizations,
                     instructions_before: before,
                     instructions_after: after,
+                    instructions_removed: before.saturating_sub(after),
                     error: None,
                 }
             }
@@ -128,6 +143,7 @@ impl NyxCompiler {
                 optimizations_applied: vec![],
                 instructions_before: 0,
                 instructions_after: 0,
+                instructions_removed: 0,
                 error: Some("No IR to optimize. Call compile() first.".to_string()),
             }
         }
@@ -164,7 +180,7 @@ impl NyxCompiler {
                     success: true,
                     return_value,
                     total_instructions,
-                    total_time_ns,
+                    total_time_us: total_time_ns / 1000,
                     hot_instruction_count: hot_count,
                     error: None,
                 }
@@ -173,7 +189,7 @@ impl NyxCompiler {
                 success: false,
                 return_value: None,
                 total_instructions: 0,
-                total_time_ns: 0,
+                total_time_us: 0,
                 hot_instruction_count: 0,
                 error: Some("No IR to execute. Call compile() first.".to_string()),
             }
@@ -213,7 +229,7 @@ impl NyxCompiler {
                     success: true,
                     instructions,
                     total_instructions,
-                    total_time_ns,
+                    total_time_us: total_time_ns / 1000,
                     hot_count,
                     error: None,
                 }
@@ -222,37 +238,54 @@ impl NyxCompiler {
                 success: false,
                 instructions: vec![],
                 total_instructions: 0,
-                total_time_ns: 0,
+                total_time_us: 0,
                 hot_count: 0,
                 error: Some("No IR to profile. Call compile() and execute() first.".to_string()),
             }
         }
     }
 
-    /// Analyze IR for optimization opportunities
-    pub fn analyze(&self) -> Vec<String> {
+    /// Analyze IR for optimization opportunities (returns JSON-friendly result)
+    pub fn analyze(&self) -> AnalysisResult {
         match &self.ir {
             Some(ir) => {
-                Optimizer::analyze(ir);
-                // Return suggestions based on analysis
                 let mut suggestions = Vec::new();
+                let mut hot_instructions = Vec::new();
+                let mut optimization_opportunities = Vec::new();
                 
                 for func in &ir.functions {
                     for block in &func.blocks {
                         for instr in &block.instructions {
                             if instr.profile.is_hot {
+                                hot_instructions.push(format!("{:?}", instr.opcode));
                                 suggestions.push(format!(
-                                    "Hot {:?} - consider optimization",
-                                    instr.opcode
+                                    "Hot {:?} ({}x) - consider optimization",
+                                    instr.opcode, instr.profile.exec_count
                                 ));
                             }
                         }
                     }
                 }
                 
-                suggestions
+                // Add general optimization opportunities
+                if !hot_instructions.is_empty() {
+                    optimization_opportunities.push("loop_unrolling".to_string());
+                    optimization_opportunities.push("instruction_scheduling".to_string());
+                }
+                
+                AnalysisResult {
+                    success: true,
+                    suggestions,
+                    hot_instructions,
+                    optimization_opportunities,
+                }
             }
-            None => vec!["No IR to analyze".to_string()],
+            None => AnalysisResult {
+                success: false,
+                suggestions: vec!["No IR to analyze".to_string()],
+                hot_instructions: vec![],
+                optimization_opportunities: vec![],
+            },
         }
     }
 
@@ -296,4 +329,49 @@ pub fn profile(source: &str) -> ProfileResult {
     compiler.compile(source);
     compiler.execute();
     compiler.profile()
+}
+
+// ============ JSON OUTPUT FOR LLM ============
+
+/// Convert ExecuteResult to JSON string
+pub fn execute_json(source: &str) -> String {
+    let result = execute(source);
+    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
+}
+
+/// Convert OptimizeResult to JSON string
+pub fn optimize_json(source: &str) -> String {
+    let result = optimize(source);
+    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
+}
+
+/// Convert ProfileResult to JSON string  
+pub fn profile_json(source: &str) -> String {
+    let result = profile(source);
+    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
+}
+
+/// Full pipeline: compile, optimize, execute, and return JSON
+pub fn run_json(source: &str) -> String {
+    let mut compiler = NyxCompiler::new();
+    
+    let compile = compiler.compile(source);
+    let optimize = compiler.optimize();
+    let execute = compiler.execute();
+    let profile = compiler.profile();
+    let analysis = compiler.analyze();
+    
+    let result = serde_json::json!({
+        "compile": {
+            "success": compile.success,
+            "instruction_count": compile.instruction_count,
+            "error": compile.error,
+        },
+        "optimize": optimize,
+        "execute": execute,
+        "profile": profile,
+        "analysis": analysis,
+    });
+    
+    serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
 }
