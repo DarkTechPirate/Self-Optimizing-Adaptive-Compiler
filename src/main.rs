@@ -4,13 +4,9 @@ mod ast;
 mod ir;
 mod vm;
 mod optimizer;
+pub mod api;
 
-use lexer::Lexer;
-use lexer::token::Token;
-use parser::parser::Parser;
-use ir::lower::Lowerer;
-use vm::vm::NyxVM;
-use optimizer::Optimizer;
+use api::NyxCompiler;
 
 fn main() {
     let source = r#"
@@ -23,34 +19,43 @@ fn main() {
         }
     "#;
 
-    // LEXER
-    let mut lexer = Lexer::new(source);
-    let mut tokens = Vec::new();
+    println!("=== Nyx Compiler API Demo ===\n");
 
-    loop {
-        let tok = lexer.next_token();
-        tokens.push(tok.clone());
-        if tok == Token::EOF { break; }
-    }
+    // Create compiler instance
+    let mut compiler = NyxCompiler::new();
 
-    // PARSER
-    let mut parser = Parser::new(tokens);
-    let program = parser.parse_program();
+    // Step 1: Compile
+    println!("1. Compiling source code...");
+    let compile_result = compiler.compile(source);
+    println!("   Compile success: {}", compile_result.success);
 
-    // AST → IR
-    let mut ir_program = Lowerer::lower_program(program);
+    // Step 2: Execute (before optimization)
+    println!("\n2. Executing (unoptimized)...");
+    let exec_result = compiler.execute();
+    println!("   Return value: {:?}", exec_result.return_value);
+    println!("   Instructions executed: {}", exec_result.total_instructions);
 
-    println!("\n=== First Run ===");
-    let mut vm = NyxVM::new();
-    vm.run_program(&mut ir_program);
+    // Step 3: Optimize
+    println!("\n3. Optimizing...");
+    let opt_result = compiler.optimize();
+    println!("   Optimizations: {:?}", opt_result.optimizations_applied);
+    println!("   Instructions: {} -> {}", opt_result.instructions_before, opt_result.instructions_after);
 
-    // Analyze
-    Optimizer::analyze(&ir_program);
+    // Step 4: Execute again (optimized)
+    println!("\n4. Executing (optimized)...");
+    let exec_result2 = compiler.execute();
+    println!("   Return value: {:?}", exec_result2.return_value);
+    println!("   Instructions executed: {}", exec_result2.total_instructions);
+    println!("   Hot instructions: {}", exec_result2.hot_instruction_count);
 
-    // Optimize
-    Optimizer::optimize(&mut ir_program);
+    // Step 5: Get profile
+    println!("\n5. Profiling...");
+    let profile = compiler.profile();
+    println!("   Total time: {}μs", profile.total_time_ns / 1000);
+    println!("   Hot instructions: {}", profile.hot_count);
 
-    println!("\n=== Recompiled Run ===");
-    let mut vm2 = NyxVM::new();
-    vm2.run_program(&mut ir_program);
+    // Using convenience functions
+    println!("\n=== Using Convenience Functions ===");
+    let result = api::execute(source);
+    println!("api::execute() returned: {:?}", result.return_value);
 }
