@@ -45,6 +45,34 @@ pub enum OpCode {
 #[derive(Debug, Clone)]
 pub struct ProfileData {
     pub exec_count: u64,
+    pub total_time_ns: u64,      // cumulative execution time in nanoseconds
+    pub last_value: Option<i64>, // last computed value (for analysis)
+    pub is_hot: bool,            // marked hot if exec_count > threshold
+}
+
+impl ProfileData {
+    pub fn new() -> Self {
+        Self {
+            exec_count: 0,
+            total_time_ns: 0,
+            last_value: None,
+            is_hot: false,
+        }
+    }
+
+    pub fn avg_time_ns(&self) -> u64 {
+        if self.exec_count > 0 {
+            self.total_time_ns / self.exec_count
+        } else {
+            0
+        }
+    }
+}
+
+impl Default for ProfileData {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, Clone)]
