@@ -15,8 +15,11 @@ use optimizer::Optimizer;
 fn main() {
     let source = r#"
         fn sum() {
-            let x = 5 + 3
-            return x
+            let total = 0
+            for i in 0..5 {
+                total = total + i
+            }
+            return total
         }
     "#;
 

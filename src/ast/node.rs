@@ -17,6 +17,25 @@ pub enum Stmt {
     },
     Return(Expr),
     Expr(Expr),
+    While {
+        condition: Expr,
+        body: Vec<Stmt>,
+    },
+    For {
+        var: String,
+        start: Expr,
+        end: Expr,
+        body: Vec<Stmt>,
+    },
+    If {
+        condition: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,
+    },
+    Assign {
+        name: String,
+        value: Expr,
+    },
 }
 
 #[derive(Debug, Clone)]

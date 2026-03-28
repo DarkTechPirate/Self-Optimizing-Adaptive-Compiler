@@ -18,6 +18,10 @@ impl Lexer {
         self.input.get(self.position).cloned()
     }
 
+    fn peek_char(&self) -> Option<char> {
+        self.input.get(self.position + 1).cloned()
+    }
+
     fn advance(&mut self) {
         self.position += 1;
     }
@@ -67,6 +71,9 @@ impl Lexer {
             "intent" => Token::Intent,
             "for" => Token::For,
             "in" => Token::In,
+            "while" => Token::While,
+            "if" => Token::If,
+            "else" => Token::Else,
             "speed" => Token::Speed,
             "parallel" => Token::Parallel,
             "memory_low" => Token::MemoryLow,
@@ -87,7 +94,56 @@ impl Lexer {
             Some('-') => { self.advance(); Token::Minus }
             Some('*') => { self.advance(); Token::Star }
             Some('/') => { self.advance(); Token::Slash }
-            Some('=') => { self.advance(); Token::Equal }
+            
+            Some('=') => {
+                self.advance();
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::EqualEqual
+                } else {
+                    Token::Equal
+                }
+            }
+            
+            Some('!') => {
+                self.advance();
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::NotEqual
+                } else {
+                    self.next_token() // skip unknown
+                }
+            }
+            
+            Some('<') => {
+                self.advance();
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::LessEqual
+                } else {
+                    Token::Less
+                }
+            }
+            
+            Some('>') => {
+                self.advance();
+                if self.current_char() == Some('=') {
+                    self.advance();
+                    Token::GreaterEqual
+                } else {
+                    Token::Greater
+                }
+            }
+            
+            Some('.') => {
+                self.advance();
+                if self.current_char() == Some('.') {
+                    self.advance();
+                    Token::DotDot
+                } else {
+                    self.next_token() // skip unknown
+                }
+            }
 
             Some(c) if c.is_ascii_digit() => self.read_number(),
             Some(c) if c.is_alphabetic() => self.read_identifier(),

@@ -24,27 +24,79 @@ impl NyxVM {
         for func in &program.functions {
             for block in &func.blocks {
                 for instr in &block.instructions {
-                    println!(
-                        "{:?} executed {} times",
-                        instr.opcode,
-                        instr.profile.exec_count
-                    );
+                    if instr.profile.exec_count > 0 {
+                        println!(
+                            "{:?} executed {} times",
+                            instr.opcode,
+                            instr.profile.exec_count
+                        );
+                    }
                 }
             }
         }
     }
 
     fn run_function(&mut self, func: &mut FunctionIR) {
+        // Build label index for all blocks
+        let mut label_map: HashMap<String, usize> = HashMap::new();
+        
+        for block in &func.blocks {
+            for (idx, instr) in block.instructions.iter().enumerate() {
+                if instr.opcode == OpCode::Label {
+                    if let Some(label) = instr.operands.first() {
+                        label_map.insert(label.clone(), idx);
+                    }
+                }
+            }
+        }
+
+        // Execute instructions with control flow
         for block in &mut func.blocks {
-            for instr in &mut block.instructions {
-                self.execute(instr);
+            let mut pc: usize = 0;
+            
+            while pc < block.instructions.len() {
+                let instr = &mut block.instructions[pc];
+                instr.profile.exec_count += 1;
+
+                match &instr.opcode {
+                    OpCode::Jump => {
+                        let target = &instr.operands[0];
+                        if let Some(&target_pc) = label_map.get(target) {
+                            pc = target_pc;
+                            continue;
+                        }
+                    }
+                    
+                    OpCode::Branch => {
+                        let cond_var = &instr.operands[0];
+                        let target = &instr.operands[1];
+                        let cond_val = self.get_value(cond_var);
+                        
+                        if cond_val != 0 {
+                            if let Some(&target_pc) = label_map.get(target) {
+                                pc = target_pc;
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    OpCode::Return => {
+                        let val = self.get_value(&instr.operands[0]);
+                        println!("Program returned: {}", val);
+                        return;
+                    }
+                    
+                    _ => {
+                        self.execute_instruction(instr);
+                    }
+                }
+                
+                pc += 1;
             }
         }
     }
 
-    fn execute(&mut self, instr: &mut Instruction) {
-        instr.profile.exec_count += 1;
-
+    fn execute_instruction(&mut self, instr: &mut Instruction) {
         match instr.opcode {
             OpCode::LoadConst => {
                 let val = instr.operands[0].parse::<i64>().unwrap();
@@ -162,21 +214,18 @@ impl NyxVM {
                 }
             }
 
-            OpCode::Return => {
-                let val = self.get_value(&instr.operands[0]);
-                println!("Program returned: {}", val);
-            }
-
-            // Control flow opcodes (Jump, Branch, Label) need block-level execution
-            // For now, they are no-ops in single-block execution
-            OpCode::Jump | OpCode::Branch | OpCode::Label | OpCode::Nop => {}
-
             OpCode::LoadVar => {
                 let val = self.get_value(&instr.operands[0]);
                 if let Some(name) = &instr.result {
                     self.variables.insert(name.clone(), val);
                 }
             }
+
+            // Control flow handled in run_function
+            OpCode::Jump | OpCode::Branch | OpCode::Return => {}
+            
+            // Labels are markers, no execution
+            OpCode::Label | OpCode::Nop => {}
 
             OpCode::Call => {
                 // Function calls to be implemented later
