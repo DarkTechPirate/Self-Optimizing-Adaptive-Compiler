@@ -42,17 +42,43 @@ fn main() {
     println!("\n3. Optimizing...");
     let opt_result = compiler.optimize();
     println!("   Optimizations: {:?}", opt_result.optimizations_applied);
-    println!("   Instructions: {} -> {} (-{})", 
-        opt_result.instructions_before, 
+    println!(
+        "   Instructions: {} -> {} (-{})",
+        opt_result.instructions_before,
         opt_result.instructions_after,
-        opt_result.instructions_removed);
+        opt_result.instructions_removed
+    );
 
     // Step 4: Execute again (optimized)
     println!("\n4. Executing (optimized)...");
     let exec_result2 = compiler.execute();
     println!("   Return value: {:?}", exec_result2.return_value);
-    println!("   Time: {}μs", exec_result2.total_time_us);
+    println!("   Time: {}us", exec_result2.total_time_us);
     println!("   Hot instructions: {}", exec_result2.hot_instruction_count);
+
+    // Optional LLM analysis step
+    let llm_client = LLMClient::new();
+    if llm_client.is_available() {
+        let profile_json = api::profile_json(source);
+        match llm_client.analyze_profile(&profile_json) {
+            Ok(llm_analysis) => {
+                println!("\n=== LLM Suggestions ===");
+                for suggestion in llm_analysis.suggestions {
+                    println!(
+                        "- {} (confidence {:.1}): {}",
+                        suggestion.strategy,
+                        suggestion.confidence,
+                        suggestion.reason
+                    );
+                }
+            }
+            Err(err) => {
+                println!("\nLLM analysis unavailable: {}", err);
+            }
+        }
+    } else {
+        println!("\nLLM not available. Skipping AI suggestions.");
+    }
 
     // Step 5: Get profile
     println!("\n5. Analysis...");
