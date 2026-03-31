@@ -7,6 +7,9 @@ pub enum Token {
     Intent,
     For,
     In,
+    While,
+    If,
+    Else,
 
     // intent keywords
     Speed,
@@ -24,6 +27,13 @@ pub enum Token {
     Star,
     Slash,
     Equal,
+    EqualEqual,  // ==
+    NotEqual,    // !=
+    Less,        // <
+    LessEqual,   // <=
+    Greater,     // >
+    GreaterEqual,// >=
+    DotDot,      // .. (range)
 
     // literals
     Number(i64),
