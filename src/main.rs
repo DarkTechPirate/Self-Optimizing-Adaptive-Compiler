@@ -5,8 +5,10 @@ mod ir;
 mod vm;
 mod optimizer;
 pub mod api;
+pub mod llm;
 
 use api::NyxCompiler;
+use llm::LLMClient;
 
 fn main() {
     let source = r#"
