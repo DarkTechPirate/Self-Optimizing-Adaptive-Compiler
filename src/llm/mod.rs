@@ -2,6 +2,8 @@
 //! 
 //! Connects to Ollama (TinyLLaMA) for AI-assisted optimization decisions.
 
+pub mod interface;
+
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
