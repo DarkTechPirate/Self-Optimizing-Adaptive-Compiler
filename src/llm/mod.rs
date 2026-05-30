@@ -6,14 +6,16 @@ pub mod interface;
 
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::env;
 
 /// Ollama API endpoint
-const OLLAMA_URL: &str = "http://127.0.0.1:11434/api/generate";
-const MODEL: &str = "tinyllama";
+const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434";
+const DEFAULT_MODEL: &str = "tinyllama";
 
 /// LLM client for optimization suggestions
 pub struct LLMClient {
     client: reqwest::blocking::Client,
+    base_url: String,
     model: String,
 }
 
@@ -51,9 +53,13 @@ pub struct LLMAnalysis {
 impl LLMClient {
     /// Create a new LLM client
     pub fn new() -> Self {
+        let base_url = env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string());
+        let model = env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+
         Self {
             client: reqwest::blocking::Client::new(),
-            model: MODEL.to_string(),
+            base_url,
+            model,
         }
     }
 
@@ -61,14 +67,25 @@ impl LLMClient {
     pub fn with_model(model: &str) -> Self {
         Self {
             client: reqwest::blocking::Client::new(),
+            base_url: DEFAULT_OLLAMA_BASE_URL.to_string(),
+            model: model.to_string(),
+        }
+    }
+
+    /// Create with custom endpoint and model
+    pub fn with_endpoint(base_url: &str, model: &str) -> Self {
+        Self {
+            client: reqwest::blocking::Client::new(),
+            base_url: base_url.to_string(),
             model: model.to_string(),
         }
     }
 
     /// Check if Ollama is running
     pub fn is_available(&self) -> bool {
+        let version_url = format!("{}/api/version", self.base_url.trim_end_matches('/'));
         self.client
-            .get("http://127.0.0.1:11434/api/version")
+            .get(version_url)
             .send()
             .map(|r| r.status().is_success())
             .unwrap_or(false)
@@ -76,6 +93,7 @@ impl LLMClient {
 
     /// Send a raw prompt to the LLM
     pub fn query(&self, prompt: &str) -> Result<String, Box<dyn Error>> {
+        let url = format!("{}/api/generate", self.base_url.trim_end_matches('/'));
         let request = OllamaRequest {
             model: self.model.clone(),
             prompt: prompt.to_string(),
@@ -83,7 +101,7 @@ impl LLMClient {
         };
 
         let response = self.client
-            .post(OLLAMA_URL)
+            .post(url)
             .json(&request)
             .send()?;
 
@@ -119,11 +137,25 @@ Respond with JSON only, no explanation:"#,
         );
 
         let response = self.query(&prompt)?;
+
+        #[derive(Deserialize)]
+        struct SuggestionsOnly {
+            suggestions: Vec<OptimizationSuggestion>,
+        }
         
         // Try to parse as JSON
-        let analysis = match serde_json::from_str::<LLMAnalysis>(&response) {
-            Ok(parsed) => parsed,
-            Err(_) => {
+        let extracted_json = Self::extract_json_object(&response);
+
+        let analysis = match extracted_json
+            .as_deref()
+            .or(Some(response.as_str()))
+            .and_then(|payload| serde_json::from_str::<SuggestionsOnly>(payload).ok())
+        {
+            Some(parsed) => LLMAnalysis {
+                suggestions: parsed.suggestions,
+                raw_response: response.clone(),
+            },
+            None => {
                 // If parsing fails, extract suggestions heuristically
                 LLMAnalysis {
                     suggestions: self.extract_suggestions(&response),
@@ -169,6 +201,21 @@ Respond with JSON only, no explanation:"#,
         }
 
         suggestions
+    }
+
+    fn extract_json_object(response: &str) -> Option<String> {
+        let trimmed = response.trim();
+        if trimmed.starts_with('{') && trimmed.ends_with('}') {
+            return Some(trimmed.to_string());
+        }
+
+        let start = trimmed.find('{')?;
+        let end = trimmed.rfind('}')?;
+        if start <= end {
+            Some(trimmed[start..=end].to_string())
+        } else {
+            None
+        }
     }
 
     /// Quick optimization check - returns simple suggestions
@@ -217,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_llm_client_creation() {
-        let client = LLMClient::new();
+        let client = LLMClient::with_model("tinyllama");
         assert_eq!(client.model, "tinyllama");
     }
 

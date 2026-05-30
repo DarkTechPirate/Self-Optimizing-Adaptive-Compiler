@@ -1,0 +1,18 @@
+fn mixed_loop_if_redundancy() {
+    let total = 0
+    let bonus = 0
+
+    for i in 0..90 {
+        let a = i * 2
+        let b = i * 2
+        total = total + a
+
+        if total > 200 {
+            bonus = bonus + b
+        } else {
+            bonus = bonus + 1
+        }
+    }
+
+    return total + bonus
+}

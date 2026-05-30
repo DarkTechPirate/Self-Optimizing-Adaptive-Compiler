@@ -1,0 +1,9 @@
+fn sum() {
+    let total = 0
+    let dead = 99
+    for i in 0..5 {
+        total = total + i
+    }
+    return total
+    let unreachable = 123
+}

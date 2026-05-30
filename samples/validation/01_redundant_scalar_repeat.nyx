@@ -1,0 +1,8 @@
+fn redundant_scalar_repeat() {
+    let a = 4
+    let b = 7
+    let x = a + b
+    let y = a + b
+    let z = a + b
+    return x + y + z
+}

@@ -1,0 +1,11 @@
+fn loop_invariant_constant() {
+    let total = 0
+
+    for i in 0..150 {
+        let scale = 10
+        let shifted = i + scale
+        total = total + shifted
+    }
+
+    return total
+}

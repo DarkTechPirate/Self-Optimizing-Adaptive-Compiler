@@ -1,0 +1,7 @@
+fn already_optimized_linear() {
+    let a = 10
+    let b = 20
+    let c = a + b
+    let d = c + 1
+    return d
+}

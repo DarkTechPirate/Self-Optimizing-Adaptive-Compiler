@@ -1,0 +1,16 @@
+fn redundant_hotpath() {
+    let total = 0
+    let bonus = 0
+
+    for i in 0..100 {
+        let calc_a = i * 2
+        let calc_b = i * 2
+        total = total + calc_a
+
+        if total > 250 {
+            bonus = bonus + calc_b
+        }
+    }
+
+    return total + bonus
+}

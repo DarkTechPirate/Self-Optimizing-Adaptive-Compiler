@@ -1,0 +1,17 @@
+fn mixed_with_dead_code() {
+    let total = 0
+    let dead_a = 1
+
+    for i in 0..70 {
+        let work = i + 3
+        let copy = i + 3
+        total = total + work + copy
+    }
+
+    if total > 100 {
+        let dead_b = dead_a + 2
+        total = total + 1
+    }
+
+    return total
+}

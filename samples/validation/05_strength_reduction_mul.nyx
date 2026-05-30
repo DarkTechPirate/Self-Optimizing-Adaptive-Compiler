@@ -1,0 +1,11 @@
+fn strength_reduction_mul() {
+    let total = 0
+
+    for i in 1..200 {
+        let x = i * 2
+        let y = 2 * i
+        total = total + x + y
+    }
+
+    return total
+}

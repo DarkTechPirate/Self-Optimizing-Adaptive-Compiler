@@ -1,18 +1,104 @@
 use std::collections::{HashMap, HashSet};
 use crate::ir::ir::*;
 
+#[derive(Debug, Clone)]
+pub struct OptimizationPlan {
+    pub constant_folding: bool,
+    pub dead_code_elimination: bool,
+    pub loop_invariant_code_motion: bool,
+    pub strength_reduction: bool,
+}
+
+impl OptimizationPlan {
+    pub fn baseline() -> Self {
+        Self {
+            constant_folding: true,
+            dead_code_elimination: true,
+            loop_invariant_code_motion: false,
+            strength_reduction: false,
+        }
+    }
+
+    pub fn aggressive() -> Self {
+        Self {
+            constant_folding: true,
+            dead_code_elimination: true,
+            loop_invariant_code_motion: true,
+            strength_reduction: true,
+        }
+    }
+
+    pub fn from_strategies(strategies: &[String]) -> Self {
+        let mut plan = Self {
+            constant_folding: false,
+            dead_code_elimination: false,
+            loop_invariant_code_motion: false,
+            strength_reduction: false,
+        };
+
+        for strategy in strategies {
+            let s = strategy.to_lowercase();
+
+            if s.contains("constant") {
+                plan.constant_folding = true;
+            }
+            if s.contains("dead code") || s.contains("dead_code") {
+                plan.dead_code_elimination = true;
+            }
+            if s.contains("loop invariant") || s.contains("loop_invariant") {
+                plan.loop_invariant_code_motion = true;
+            }
+            if s.contains("strength") {
+                plan.strength_reduction = true;
+            }
+        }
+
+        if !plan.has_enabled_passes() {
+            Self::baseline()
+        } else {
+            plan
+        }
+    }
+
+    pub fn has_enabled_passes(&self) -> bool {
+        self.constant_folding
+            || self.dead_code_elimination
+            || self.loop_invariant_code_motion
+            || self.strength_reduction
+    }
+
+    pub fn enabled_passes(&self) -> Vec<String> {
+        let mut passes = Vec::new();
+
+        if self.constant_folding {
+            passes.push("constant_folding".to_string());
+        }
+        if self.dead_code_elimination {
+            passes.push("dead_code_elimination".to_string());
+        }
+        if self.loop_invariant_code_motion {
+            passes.push("loop_invariant_code_motion".to_string());
+        }
+        if self.strength_reduction {
+            passes.push("strength_reduction".to_string());
+        }
+
+        passes
+    }
+}
+
 pub struct Optimizer;
 
 impl Optimizer {
     pub fn analyze(program: &ProgramIR) {
-        println!("\n=== Optimizer Analysis ===");
+        eprintln!("\n=== Optimizer Analysis ===");
 
         let mut hot_loops = 0;
         for func in &program.functions {
             for block in &func.blocks {
                 for instr in &block.instructions {
                     if instr.profile.exec_count > 1 {
-                        println!("Hot instruction ({} execs): {:?}", instr.profile.exec_count, instr.opcode);
+                        eprintln!("Hot instruction ({} execs): {:?}", instr.profile.exec_count, instr.opcode);
                         if instr.opcode == OpCode::Label && instr.operands.first().map(|s| s.contains("for") || s.contains("while")).unwrap_or(false) {
                             hot_loops += 1;
                         }
@@ -21,18 +107,33 @@ impl Optimizer {
             }
         }
         if hot_loops > 0 {
-            println!("Detected {} hot loop(s) - candidates for optimization", hot_loops);
+            eprintln!("Detected {} hot loop(s) - candidates for optimization", hot_loops);
         }
     }
 
     /// Run all optimization passes
-    pub fn optimize(program: &mut ProgramIR) {
-        println!("\n=== Optimization Pass ===");
+    pub fn optimize(program: &mut ProgramIR) -> Vec<String> {
+        Self::optimize_with_plan(program, &OptimizationPlan::aggressive())
+    }
 
-        Self::constant_folding(program);
-        Self::loop_invariant_code_motion(program);
-        Self::strength_reduction(program);
-        Self::dead_code_elimination(program);
+    /// Run selected optimization passes
+    pub fn optimize_with_plan(program: &mut ProgramIR, plan: &OptimizationPlan) -> Vec<String> {
+        eprintln!("\n=== Optimization Pass ===");
+
+        if plan.constant_folding {
+            Self::constant_folding(program);
+        }
+        if plan.loop_invariant_code_motion {
+            Self::loop_invariant_code_motion(program);
+        }
+        if plan.strength_reduction {
+            Self::strength_reduction(program);
+        }
+        if plan.dead_code_elimination {
+            Self::dead_code_elimination(program);
+        }
+
+        plan.enabled_passes()
     }
 
     /// Helper: get constant value from operand
@@ -84,7 +185,7 @@ impl Optimizer {
                                     OpCode::Mod => "%",
                                     _ => "?",
                                 };
-                                println!("[Constant Fold] {} {} {} -> {}", a, op_str, b, result);
+                                eprintln!("[Constant Fold] {} {} {} -> {}", a, op_str, b, result);
                                 Some(result)
                             } else {
                                 None
@@ -114,7 +215,7 @@ impl Optimizer {
                                     OpCode::CmpGe => ">=",
                                     _ => "?",
                                 };
-                                println!("[Constant Fold] {} {} {} -> {}", a, op_str, b, result);
+                                eprintln!("[Constant Fold] {} {} {} -> {}", a, op_str, b, result);
                                 Some(result)
                             } else {
                                 None
@@ -123,7 +224,7 @@ impl Optimizer {
                         OpCode::Neg => {
                             let v = Self::get_const(&instr.operands[0], &constants);
                             if let Some(a) = v {
-                                println!("[Constant Fold] -{} -> {}", a, -a);
+                                eprintln!("[Constant Fold] -{} -> {}", a, -a);
                                 Some(-a)
                             } else {
                                 None
@@ -214,7 +315,7 @@ impl Optimizer {
 
                 block.instructions.retain(|instr| {
                     if seen_return {
-                        println!("[DCE] Removed unreachable: {:?}", instr.opcode);
+                        eprintln!("[DCE] Removed unreachable: {:?}", instr.opcode);
                         return false;
                     }
 
@@ -223,11 +324,24 @@ impl Optimizer {
                         return true;
                     }
 
+                    if instr.opcode == OpCode::StoreVar {
+                        let store_target = instr.result.as_ref();
+                        let store_is_needed = store_target
+                            .map(|r| used_vars.contains(r) || loop_vars.contains(r))
+                            .unwrap_or(false);
+
+                        if !store_is_needed {
+                            eprintln!("[DCE] Removed dead store: {:?}", instr.result);
+                            return false;
+                        }
+
+                        return true;
+                    }
+
                     // Instructions with side effects
                     let has_side_effect = matches!(
                         instr.opcode,
-                        OpCode::Return | OpCode::StoreVar | OpCode::Call | 
-                        OpCode::Jump | OpCode::Branch | OpCode::Label
+                        OpCode::Return | OpCode::Call | OpCode::Jump | OpCode::Branch | OpCode::Label
                     );
                     
                     let is_used = instr.result.as_ref()
@@ -235,7 +349,7 @@ impl Optimizer {
                         .unwrap_or(false);
 
                     if !has_side_effect && !is_used {
-                        println!("[DCE] Removed dead code: {:?} -> {:?}", instr.opcode, instr.result);
+                        eprintln!("[DCE] Removed dead code: {:?} -> {:?}", instr.opcode, instr.result);
                         return false;
                     }
 
@@ -244,7 +358,7 @@ impl Optimizer {
 
                 let removed = original_count - block.instructions.len();
                 if removed > 0 {
-                    println!("[DCE] Eliminated {} dead instruction(s)", removed);
+                    eprintln!("[DCE] Eliminated {} dead instruction(s)", removed);
                 }
             }
         }
@@ -306,7 +420,7 @@ impl Optimizer {
                                 for (offset, &idx) in to_hoist.iter().enumerate() {
                                     let actual_idx = idx - offset;
                                     let hoisted = block.instructions.remove(actual_idx);
-                                    println!("[LICM] Hoisted {:?} out of loop", hoisted.opcode);
+                                    eprintln!("[LICM] Hoisted {:?} out of loop", hoisted.opcode);
                                     block.instructions.insert(i, hoisted);
                                 }
                             }
@@ -329,13 +443,13 @@ impl Optimizer {
                             // x * 2 -> x + x
                             if instr.operands.len() == 2 {
                                 if instr.operands[1] == "2" {
-                                    println!("[Strength Reduction] {} * 2 -> {} + {}", 
+                                    eprintln!("[Strength Reduction] {} * 2 -> {} + {}", 
                                         instr.operands[0], instr.operands[0], instr.operands[0]);
                                     instr.opcode = OpCode::Add;
                                     let op = instr.operands[0].clone();
                                     instr.operands = vec![op.clone(), op];
                                 } else if instr.operands[0] == "2" {
-                                    println!("[Strength Reduction] 2 * {} -> {} + {}", 
+                                    eprintln!("[Strength Reduction] 2 * {} -> {} + {}", 
                                         instr.operands[1], instr.operands[1], instr.operands[1]);
                                     instr.opcode = OpCode::Add;
                                     let op = instr.operands[1].clone();
@@ -346,7 +460,7 @@ impl Optimizer {
                         OpCode::Div => {
                             // x / 1 -> x (copy)
                             if instr.operands.len() == 2 && instr.operands[1] == "1" {
-                                println!("[Strength Reduction] {} / 1 -> copy", instr.operands[0]);
+                                eprintln!("[Strength Reduction] {} / 1 -> copy", instr.operands[0]);
                                 instr.opcode = OpCode::Copy;
                                 instr.operands = vec![instr.operands[0].clone()];
                             }

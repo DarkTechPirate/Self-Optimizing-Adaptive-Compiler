@@ -1,0 +1,11 @@
+fn redundant_loop_hotpath() {
+    let total = 0
+
+    for i in 0..120 {
+        let left = i * 3
+        let right = i * 3
+        total = total + left + right
+    }
+
+    return total
+}

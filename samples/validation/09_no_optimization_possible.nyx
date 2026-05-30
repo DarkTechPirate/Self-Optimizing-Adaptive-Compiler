@@ -1,0 +1,9 @@
+fn no_optimization_possible() {
+    let total = 0
+
+    for i in 0..50 {
+        total = total + i
+    }
+
+    return total
+}

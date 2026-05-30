@@ -5,7 +5,11 @@ use crate::parser::parser::Parser;
 use crate::ir::lower::Lowerer;
 use crate::ir::ir::ProgramIR;
 use crate::vm::vm::NyxVM;
-use crate::optimizer::Optimizer;
+use crate::optimizer::{OptimizationPlan, Optimizer};
+
+pub mod server;
+pub mod learning;
+pub mod input;
 
 /// Result of compilation (JSON-serializable for LLM)
 #[derive(Debug, Serialize)]
@@ -116,16 +120,40 @@ impl NyxCompiler {
         match &mut self.ir {
             Some(ir) => {
                 let before = Self::count_instructions(ir);
-                
-                let mut optimizations = Vec::new();
-                
+
+                // Run full aggressive optimization pipeline
+                let optimizations = Optimizer::optimize(ir);
+
+                let after = Self::count_instructions(ir);
+
+                OptimizeResult {
+                    success: true,
+                    optimizations_applied: optimizations,
+                    instructions_before: before,
+                    instructions_after: after,
+                    instructions_removed: before.saturating_sub(after),
+                    error: None,
+                }
+            }
+            None => OptimizeResult {
+                success: false,
+                optimizations_applied: vec![],
+                instructions_before: 0,
+                instructions_after: 0,
+                instructions_removed: 0,
+                error: Some("No IR to optimize. Call compile() first.".to_string()),
+            },
+        }
+    }
+
+    /// Optimize using an explicit optimization plan
+    pub fn optimize_with_plan(&mut self, plan: OptimizationPlan) -> OptimizeResult {
+        match &mut self.ir {
+            Some(ir) => {
+                let before = Self::count_instructions(ir);
+
                 // Run optimization passes
-                Optimizer::optimize(ir);
-                
-                optimizations.push("constant_folding".to_string());
-                optimizations.push("dead_code_elimination".to_string());
-                optimizations.push("loop_invariant_code_motion".to_string());
-                optimizations.push("strength_reduction".to_string());
+                let optimizations = Optimizer::optimize_with_plan(ir, &plan);
 
                 let after = Self::count_instructions(ir);
 
@@ -149,10 +177,17 @@ impl NyxCompiler {
         }
     }
 
+    /// Optimize using strategy strings, typically sourced from LLM suggestions
+    pub fn optimize_with_strategies(&mut self, strategies: &[String]) -> OptimizeResult {
+        let plan = OptimizationPlan::from_strategies(strategies);
+        self.optimize_with_plan(plan)
+    }
+
     /// Execute the compiled (and optionally optimized) IR
     pub fn execute(&mut self) -> ExecuteResult {
         match &mut self.ir {
             Some(ir) => {
+                Self::reset_profiles(ir);
                 self.vm.run_program(ir);
 
                 // Gather stats
@@ -300,6 +335,19 @@ impl NyxCompiler {
             .flat_map(|b| b.instructions.iter())
             .count()
     }
+
+    fn reset_profiles(ir: &mut ProgramIR) {
+        for func in &mut ir.functions {
+            for block in &mut func.blocks {
+                for instr in &mut block.instructions {
+                    instr.profile.exec_count = 0;
+                    instr.profile.total_time_ns = 0;
+                    instr.profile.last_value = None;
+                    instr.profile.is_hot = false;
+                }
+            }
+        }
+    }
 }
 
 impl Default for NyxCompiler {
@@ -354,24 +402,88 @@ pub fn profile_json(source: &str) -> String {
 /// Full pipeline: compile, optimize, execute, and return JSON
 pub fn run_json(source: &str) -> String {
     let mut compiler = NyxCompiler::new();
-    
+
     let compile = compiler.compile(source);
+    let execute_original = compiler.execute();
+    let profile_original = compiler.profile();
     let optimize = compiler.optimize();
-    let execute = compiler.execute();
-    let profile = compiler.profile();
+    let execute_optimized = compiler.execute();
+    let profile_optimized = compiler.profile();
     let analysis = compiler.analyze();
-    
+
+    let speedup_ratio = if execute_optimized.total_time_us > 0 {
+        execute_original.total_time_us as f64 / execute_optimized.total_time_us as f64
+    } else {
+        0.0
+    };
+
     let result = serde_json::json!({
         "compile": {
             "success": compile.success,
             "instruction_count": compile.instruction_count,
             "error": compile.error,
         },
+        "original_execution_time_us": execute_original.total_time_us,
+        "optimized_execution_time_us": execute_optimized.total_time_us,
+        "speedup_ratio": speedup_ratio,
+        "optimizations_applied": optimize.optimizations_applied.clone(),
+        "llm_suggestions": [],
+        "execute_original": execute_original,
+        "profile_original": profile_original,
         "optimize": optimize,
-        "execute": execute,
-        "profile": profile,
+        "execute_optimized": execute_optimized,
+        "profile_optimized": profile_optimized,
         "analysis": analysis,
     });
-    
+
     serde_json::to_string_pretty(&result).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dead_code_elimination_removes_dead_store() {
+        let source = r#"
+            fn demo() {
+                let x = 5
+                return 10
+            }
+        "#;
+
+        let mut compiler = NyxCompiler::new();
+        let compile = compiler.compile(source);
+
+        let strategies = vec!["dead_code_elimination".to_string()];
+        let optimize = compiler.optimize_with_strategies(&strategies);
+
+        assert!(optimize.success);
+        assert!(optimize.optimizations_applied.iter().any(|p| p == "dead_code_elimination"));
+        assert!(optimize.instructions_after < compile.instruction_count);
+    }
+
+    #[test]
+    fn strategy_mapping_enables_requested_passes() {
+        let source = r#"
+            fn demo() {
+                let x = 5
+                let y = x * 2
+                return y
+            }
+        "#;
+
+        let mut compiler = NyxCompiler::new();
+        compiler.compile(source);
+
+        let strategies = vec![
+            "constant_propagation".to_string(),
+            "strength_reduction".to_string(),
+        ];
+        let optimize = compiler.optimize_with_strategies(&strategies);
+
+        assert!(optimize.success);
+        assert!(optimize.optimizations_applied.iter().any(|p| p == "constant_folding"));
+        assert!(optimize.optimizations_applied.iter().any(|p| p == "strength_reduction"));
+    }
 }

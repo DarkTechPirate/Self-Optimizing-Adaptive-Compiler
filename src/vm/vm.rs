@@ -27,7 +27,7 @@ impl NyxVM {
     }
 
     fn print_profile(&self, program: &mut ProgramIR) {
-        println!("\n=== Profiling Data ===");
+        eprintln!("\n=== Profiling Data ===");
         
         let mut total_instructions = 0u64;
         let mut total_time_ns = 0u64;
@@ -47,7 +47,7 @@ impl NyxVM {
                         }
 
                         let hot_marker = if instr.profile.is_hot { "🔥" } else { "  " };
-                        println!(
+                        eprintln!(
                             "{} {:?}: {} execs, {}ns avg",
                             hot_marker,
                             instr.opcode,
@@ -59,10 +59,10 @@ impl NyxVM {
             }
         }
 
-        println!("---");
-        println!("Total: {} instruction executions", total_instructions);
-        println!("Total time: {}μs", total_time_ns / 1000);
-        println!("Hot instructions: {} (threshold: >{})", hot_count, HOT_THRESHOLD);
+        eprintln!("---");
+        eprintln!("Total: {} instruction executions", total_instructions);
+        eprintln!("Total time: {}μs", total_time_ns / 1000);
+        eprintln!("Hot instructions: {} (threshold: >{})", hot_count, HOT_THRESHOLD);
     }
 
     fn run_function(&mut self, func: &mut FunctionIR) {
@@ -122,7 +122,7 @@ impl NyxVM {
                         let elapsed = start_time.elapsed().as_nanos() as u64;
                         block.instructions[pc].profile.total_time_ns += elapsed;
                         block.instructions[pc].profile.last_value = Some(val);
-                        println!("Program returned: {}", val);
+                        eprintln!("Program returned: {}", val);
                         return;
                     }
                     

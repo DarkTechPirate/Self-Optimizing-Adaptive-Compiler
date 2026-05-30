@@ -1,0 +1,11 @@
+fn dead_code_unreachable() {
+    let total = 0
+    let unused = 55
+
+    for i in 0..10 {
+        total = total + i
+    }
+
+    return total
+    let unreachable = total + unused
+}
