@@ -1,4 +1,4 @@
-# Nyx Runtime
+# Nyx
 
 Nyx is a self-learning runtime that automatically makes your code faster over time.
 
