@@ -221,6 +221,7 @@ async fn optimize_handler(
     let baseline_profile = compiler.profile();
     let mode = normalize_mode(request.mode.as_deref());
     let features = extract_program_features(&normalized.source);
+    let hash = program_hash(&normalized.source);
     let history = read_learning_events(&state.learning_file, 1000);
     let (llm_status, llm_suggestions) =
         maybe_collect_llm_suggestions(&baseline_profile, request.no_llm).await;
@@ -237,6 +238,8 @@ async fn optimize_handler(
         &features,
         &history,
         threshold_for_mode(mode),
+        mode,
+        &hash,
     );
 
     let optimize = compiler.optimize_with_strategies(&decision.selected_strategies);
@@ -290,6 +293,9 @@ async fn optimize_handler(
         "speedup_ratio": speedup_ratio,
         "historical_event_count": history.len(),
         "reused_history": decision.reused_history,
+        "program_cached_strategies": decision.program_cached_strategies,
+        "program_cache_hit": decision.program_cache_hit,
+        "retained_history_events": decision.retained_history_events,
         "selected_strategies": decision.selected_strategies,
         "strategy_scores": decision.strategy_scores,
         "instruction_count_before": optimize.instructions_before,
@@ -587,6 +593,26 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
         </div>
 
         <div class="panel">
+            <h2>Decision Rationale</h2>
+            <div id="decisionReasons"></div>
+        </div>
+
+        <div class="panel">
+            <h2>Per-Program Time Saved</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Program</th>
+                        <th>Runs</th>
+                        <th>Total Saved</th>
+                        <th>Avg Speedup</th>
+                    </tr>
+                </thead>
+                <tbody id="programRows"></tbody>
+            </table>
+        </div>
+
+        <div class="panel">
             <h2>Optimization Timeline</h2>
             <table>
                 <thead>
@@ -615,6 +641,22 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
                     </tr>
                 </thead>
                 <tbody id="strategyRows"></tbody>
+            </table>
+        </div>
+
+        <div class="panel">
+            <h2>Strategy Win Rates by Code Shape</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Shape</th>
+                        <th>Strategy</th>
+                        <th>Runs</th>
+                        <th>Avg Speedup</th>
+                        <th>Success Rate</th>
+                    </tr>
+                </thead>
+                <tbody id="shapeRows"></tbody>
             </table>
         </div>
 
@@ -673,7 +715,7 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
 
     async function load() {
             const [metricsRes, learningRes] = await Promise.all([
-                fetch('/metrics/recent?limit=35'),
+                fetch('/metrics/recent?limit=200'),
                 fetch('/learning/summary?limit=15')
             ]);
 
@@ -713,6 +755,97 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
             reasonBox.innerHTML = reasons.length
                 ? reasons.slice(0, 8).map(r => `<div class='reason'>${r}</div>`).join('')
                 : "<div class='reason'>No LLM reasoning captured yet.</div>";
+
+            const decisionReasons = [];
+            for (const evt of optimizeEvents.slice().reverse()) {
+                const scores = evt.payload.strategy_scores || [];
+                const selected = new Set(evt.payload.selected_strategies || []);
+                for (const s of scores) {
+                    if (selected.size && !selected.has(s.strategy)) continue;
+                    if (s.reason) {
+                        decisionReasons.push(`${s.strategy}: ${s.reason}`);
+                    }
+                }
+            }
+            const decisionBox = document.getElementById('decisionReasons');
+            decisionBox.innerHTML = decisionReasons.length
+                ? decisionReasons.slice(0, 8).map(r => `<div class='reason'>${r}</div>`).join('')
+                : "<div class='reason'>No decision rationale captured yet.</div>";
+
+            const programMap = new Map();
+            for (const evt of optimizeEvents) {
+                const payload = evt.payload || {};
+                const hash = payload.program_hash || 'unknown';
+                const entry = programMap.get(hash) || { runs: 0, saved: 0, speedupSum: 0 };
+                entry.runs += 1;
+                entry.saved += payload.time_saved_us || 0;
+                entry.speedupSum += payload.speedup_ratio || 0;
+                programMap.set(hash, entry);
+            }
+
+            const programRows = document.getElementById('programRows');
+            programRows.innerHTML = '';
+            const programList = Array.from(programMap.entries())
+                .map(([hash, entry]) => ({
+                    hash,
+                    runs: entry.runs,
+                    saved: entry.saved,
+                    avgSpeedup: entry.runs ? entry.speedupSum / entry.runs : 0
+                }))
+                .sort((a, b) => b.saved - a.saved)
+                .slice(0, 8);
+
+            for (const item of programList) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${item.hash}</td><td>${item.runs}</td><td>${formatDurationUs(item.saved)}</td><td>${item.avgSpeedup.toFixed(2)}x</td>`;
+                programRows.appendChild(tr);
+            }
+
+            function shapeFor(features) {
+                if (!features) return 'unknown';
+                const loops = features.num_loops || 0;
+                const branches = features.branching_depth || 0;
+                const ops = features.num_operations || 0;
+                let shape = 'linear';
+                if (loops > 0 && branches > 0) shape = 'loop+branch';
+                else if (loops > 0) shape = 'loop-heavy';
+                else if (branches > 0) shape = 'branching';
+                if (ops > 20) shape += ' compute';
+                return shape;
+            }
+
+            const shapeMap = new Map();
+            for (const evt of optimizeEvents) {
+                const payload = evt.payload || {};
+                const shape = shapeFor(payload.input_features);
+                const strategies = payload.selected_strategies || payload.optimization_decisions || [];
+                for (const strategy of strategies) {
+                    const key = `${shape}::${strategy}`;
+                    const entry = shapeMap.get(key) || { shape, strategy, runs: 0, success: 0, speedupSum: 0 };
+                    entry.runs += 1;
+                    const speedup = payload.speedup_ratio || 0;
+                    entry.speedupSum += speedup;
+                    if (speedup > 1.0) entry.success += 1;
+                    shapeMap.set(key, entry);
+                }
+            }
+
+            const shapeRows = document.getElementById('shapeRows');
+            shapeRows.innerHTML = '';
+            const shapeList = Array.from(shapeMap.values())
+                .map(entry => ({
+                    ...entry,
+                    avgSpeedup: entry.runs ? entry.speedupSum / entry.runs : 0,
+                    successRate: entry.runs ? entry.success / entry.runs : 0
+                }))
+                .sort((a, b) => b.avgSpeedup - a.avgSpeedup)
+                .slice(0, 10);
+
+            for (const entry of shapeList) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${entry.shape}</td><td>${entry.strategy}</td><td>${entry.runs}</td><td>${entry.avgSpeedup.toFixed(2)}x</td><td>${Math.round(entry.successRate * 100)}%</td>`;
+                shapeRows.appendChild(tr);
+            }
 
             const timelineRows = document.getElementById('timelineRows');
             timelineRows.innerHTML = '';

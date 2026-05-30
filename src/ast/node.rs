@@ -2,6 +2,14 @@
 pub enum Expr {
     Number(i64),
     Identifier(String),
+    Unary {
+        op: String,
+        expr: Box<Expr>,
+    },
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
     Binary {
         left: Box<Expr>,
         op: String,

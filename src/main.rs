@@ -179,6 +179,9 @@ fn run_command(file: &Path, mode: Mode, no_llm: bool, log_file: &Path) -> Result
         "process_memory_bytes": current_process_memory_bytes(),
         "historical_event_count": historical_event_count,
         "reused_history": decision.reused_history,
+        "program_cached_strategies": decision.program_cached_strategies,
+        "program_cache_hit": decision.program_cache_hit,
+        "retained_history_events": decision.retained_history_events,
         "selected_strategies": decision.selected_strategies,
         "strategy_scores": decision.strategy_scores,
         "instruction_count_before": optimize.instructions_before,
@@ -316,6 +319,9 @@ fn optimize_command(file: &Path, mode: Mode, no_llm: bool, log_file: &Path) -> R
         "speedup_ratio": speedup_ratio,
         "historical_event_count": historical_event_count,
         "reused_history": decision.reused_history,
+        "program_cached_strategies": decision.program_cached_strategies,
+        "program_cache_hit": decision.program_cache_hit,
+        "retained_history_events": decision.retained_history_events,
         "selected_strategies": decision.selected_strategies,
         "strategy_scores": decision.strategy_scores,
         "process_memory_bytes": current_process_memory_bytes(),
@@ -361,6 +367,7 @@ fn build_strategy_decision(
     log_file: &Path,
 ) -> (ProgramFeatures, StrategyDecision, PathBuf, Vec<LearningEvent>) {
     let features = extract_program_features(source);
+    let hash = program_hash(source);
     let learning_file = learning_log_path(log_file);
     let history = read_learning_events(&learning_file, 1000);
 
@@ -377,6 +384,8 @@ fn build_strategy_decision(
         &features,
         &history,
         threshold_for_mode(mode_label),
+        mode_label,
+        &hash,
     );
 
     (features, decision, learning_file, history)

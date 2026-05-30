@@ -19,6 +19,7 @@ enum BlockKind {
 struct OpenBlock {
     indent: usize,
     kind: BlockKind,
+    closing_lines: Vec<String>,
 }
 
 pub fn normalize_source_input(source: &str) -> NormalizedSource {
@@ -61,6 +62,16 @@ fn looks_like_python(source: &str) -> bool {
         {
             has_python_marker = true;
         }
+
+        if trimmed.starts_with("elif ") && trimmed.ends_with(':') {
+            has_python_marker = true;
+        }
+
+        if trimmed.contains("+=") || trimmed.contains("-=") || trimmed.contains("*=")
+            || trimmed.contains("/=") || trimmed.contains("%=")
+        {
+            has_python_marker = true;
+        }
     }
 
     has_python_marker
@@ -81,6 +92,7 @@ fn translate_python_to_nyx(source: &str) -> String {
         blocks.push(OpenBlock {
             indent: 0,
             kind: BlockKind::Wrapper,
+            closing_lines: Vec::new(),
         });
     }
 
@@ -104,17 +116,33 @@ fn translate_python_to_nyx(source: &str) -> String {
             blocks.push(OpenBlock {
                 indent,
                 kind: BlockKind::Function,
+                closing_lines: Vec::new(),
             });
             declared_vars.clear();
             continue;
         }
 
-        if let Some((var, start, end)) = parse_for_range(trimmed) {
-            output.push(format!("for {} in {}..{} {{", var, start, end));
-            blocks.push(OpenBlock {
-                indent,
-                kind: BlockKind::Control,
-            });
+        if let Some(for_range) = parse_for_range(trimmed) {
+            if let Some(step) = for_range.step {
+                if declared_vars.insert(for_range.var.clone()) {
+                    output.push(format!("let {} = {}", for_range.var, for_range.start));
+                } else {
+                    output.push(format!("{} = {}", for_range.var, for_range.start));
+                }
+                output.push(format!("while {} < {} {{", for_range.var, for_range.end));
+                blocks.push(OpenBlock {
+                    indent,
+                    kind: BlockKind::Control,
+                    closing_lines: vec![format!("{} = {} + {}", for_range.var, for_range.var, step)],
+                });
+            } else {
+                output.push(format!("for {} in {}..{} {{", for_range.var, for_range.start, for_range.end));
+                blocks.push(OpenBlock {
+                    indent,
+                    kind: BlockKind::Control,
+                    closing_lines: Vec::new(),
+                });
+            }
             continue;
         }
 
@@ -123,6 +151,7 @@ fn translate_python_to_nyx(source: &str) -> String {
             blocks.push(OpenBlock {
                 indent,
                 kind: BlockKind::Control,
+                closing_lines: Vec::new(),
             });
             continue;
         }
@@ -132,6 +161,24 @@ fn translate_python_to_nyx(source: &str) -> String {
             blocks.push(OpenBlock {
                 indent,
                 kind: BlockKind::Control,
+                closing_lines: Vec::new(),
+            });
+            continue;
+        }
+
+        if let Some(condition) = parse_elif(trimmed) {
+            close_blocks_for_indent(indent, &mut blocks, &mut output, &mut declared_vars);
+            output.push("else {".to_string());
+            blocks.push(OpenBlock {
+                indent,
+                kind: BlockKind::Control,
+                closing_lines: Vec::new(),
+            });
+            output.push(format!("if {} {{", condition));
+            blocks.push(OpenBlock {
+                indent: indent + 1,
+                kind: BlockKind::Control,
+                closing_lines: Vec::new(),
             });
             continue;
         }
@@ -141,6 +188,7 @@ fn translate_python_to_nyx(source: &str) -> String {
             blocks.push(OpenBlock {
                 indent,
                 kind: BlockKind::Control,
+                closing_lines: Vec::new(),
             });
             continue;
         }
@@ -151,6 +199,17 @@ fn translate_python_to_nyx(source: &str) -> String {
         }
 
         if trimmed == "pass" {
+            continue;
+        }
+
+        if let Some((lhs, op, rhs)) = parse_augmented_assignment(trimmed) {
+            let rhs = normalize_expr(&rhs);
+            let expr = format!("{} {} {}", lhs, op, rhs);
+            if declared_vars.insert(lhs.clone()) {
+                output.push(format!("let {} = {}", lhs, expr));
+            } else {
+                output.push(format!("{} = {}", lhs, expr));
+            }
             continue;
         }
 
@@ -170,6 +229,9 @@ fn translate_python_to_nyx(source: &str) -> String {
     }
 
     while let Some(block) = blocks.pop() {
+        for line in &block.closing_lines {
+            output.push(line.clone());
+        }
         output.push("}".to_string());
         if matches!(block.kind, BlockKind::Function | BlockKind::Wrapper) {
             declared_vars.clear();
@@ -200,6 +262,9 @@ fn close_blocks_for_indent(
         }
 
         if let Some(closed) = blocks.pop() {
+            for line in &closed.closing_lines {
+                output.push(line.clone());
+            }
             output.push("}".to_string());
             if matches!(closed.kind, BlockKind::Function) {
                 declared_vars.clear();
@@ -238,7 +303,15 @@ fn normalize_parameter(param: &str) -> String {
     without_default.trim().trim_start_matches('*').to_string()
 }
 
-fn parse_for_range(line: &str) -> Option<(String, String, String)> {
+#[derive(Debug, Clone)]
+struct ForRange {
+    var: String,
+    start: String,
+    end: String,
+    step: Option<String>,
+}
+
+fn parse_for_range(line: &str) -> Option<ForRange> {
     let rest = line.strip_prefix("for ")?.strip_suffix(':')?.trim();
     let (var_part, iter_part) = rest.split_once(" in ")?;
     let var = var_part.trim();
@@ -258,12 +331,18 @@ fn parse_for_range(line: &str) -> Option<(String, String, String)> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let (start, end) = match args.len() {
-        1 => ("0".to_string(), args[0].clone()),
-        _ => (args[0].clone(), args[1].clone()),
+    let (start, end, step) = match args.len() {
+        1 => ("0".to_string(), args[0].clone(), None),
+        2 => (args[0].clone(), args[1].clone(), None),
+        _ => (args[0].clone(), args[1].clone(), Some(args[2].clone())),
     };
 
-    Some((var.to_string(), normalize_expr(&start), normalize_expr(&end)))
+    Some(ForRange {
+        var: var.to_string(),
+        start: normalize_expr(&start),
+        end: normalize_expr(&end),
+        step: step.map(|s| normalize_expr(&s)),
+    })
 }
 
 fn parse_block_condition(line: &str, prefix: &str) -> Option<String> {
@@ -272,6 +351,33 @@ fn parse_block_condition(line: &str, prefix: &str) -> Option<String> {
         return None;
     }
     Some(normalize_expr(rest))
+}
+
+fn parse_elif(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("elif ")?.strip_suffix(':')?.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    Some(normalize_expr(rest))
+}
+
+fn parse_augmented_assignment(line: &str) -> Option<(String, String, String)> {
+    let ops = ["+=", "-=", "*=", "/=", "%="];
+    for op in ops {
+        if let Some((lhs, rhs)) = line.split_once(op) {
+            let lhs = lhs.trim();
+            let rhs = rhs.trim();
+            if lhs.is_empty() || rhs.is_empty() {
+                return None;
+            }
+            if !lhs.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return None;
+            }
+            let binary_op = &op[..1];
+            return Some((lhs.to_string(), binary_op.to_string(), rhs.to_string()));
+        }
+    }
+    None
 }
 
 fn parse_assignment(line: &str) -> Option<(String, String)> {
@@ -371,5 +477,46 @@ if x < y:
         assert!(normalized.source.starts_with("fn main() {"));
         assert!(normalized.source.contains("if x < y {"));
         assert!(normalized.source.ends_with('}'));
+    }
+
+    #[test]
+    fn translates_python_elif_chain() {
+        let source = r#"
+x = 3
+if x < 0:
+    x = 0
+elif x < 5:
+    x = x + 1
+else:
+    x = x - 1
+"#;
+
+        let normalized = normalize_source_input(source);
+        assert!(normalized.source.contains("else {"));
+        assert!(normalized.source.contains("if x < 5 {"));
+    }
+
+    #[test]
+    fn translates_augmented_assignment() {
+        let source = r#"
+x = 1
+x += 2
+"#;
+
+        let normalized = normalize_source_input(source);
+        assert!(normalized.source.contains("x = x + 2"));
+    }
+
+    #[test]
+    fn translates_range_with_step_to_while() {
+        let source = r#"
+for i in range(0, 6, 2):
+    x = i
+"#;
+
+        let normalized = normalize_source_input(source);
+        assert!(normalized.source.contains("let i = 0"));
+        assert!(normalized.source.contains("while i < 6"));
+        assert!(normalized.source.contains("i = i + 2"));
     }
 }

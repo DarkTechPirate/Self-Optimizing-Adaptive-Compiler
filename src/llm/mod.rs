@@ -131,6 +131,9 @@ Available strategies:
 - "dead_code_elimination" - Remove unused code
 - "strength_reduction" - Replace expensive ops with cheaper ones
 - "loop_invariant_motion" - Move invariant code out of loops
+- "common_subexpression_elimination" - Reuse repeated expressions
+- "peephole" - Local instruction simplifications
+- "vectorize" - Mark vectorizable arithmetic sequences
 
 Respond with JSON only, no explanation:"#,
             profile_json
@@ -179,6 +182,11 @@ Respond with JSON only, no explanation:"#,
             ("dead_code_elimination", "dead code"),
             ("strength_reduction", "strength reduction"),
             ("loop_invariant_motion", "loop invariant"),
+            ("common_subexpression_elimination", "common subexpression"),
+            ("common_subexpression_elimination", "cse"),
+            ("peephole", "peephole"),
+            ("vectorize", "vector"),
+            ("vectorize", "simd"),
         ];
 
         for (strategy, keyword) in strategies {

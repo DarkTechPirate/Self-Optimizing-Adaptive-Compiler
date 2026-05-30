@@ -332,6 +332,43 @@ impl Lowerer {
 
             Expr::Identifier(name) => name,
 
+            Expr::Unary { op, expr } => {
+                let value = self.lower_expr(*expr, instructions);
+                match op.as_str() {
+                    "+" => value,
+                    "-" => {
+                        let temp = format!("t{}", instructions.len());
+                        instructions.push(Instruction {
+                            opcode: OpCode::Neg,
+                            operands: vec![value],
+                            result: Some(temp.clone()),
+                            intents: vec![],
+                            profile: ProfileData::new(),
+                        });
+                        temp
+                    }
+                    _ => value,
+                }
+            }
+
+            Expr::Call { name, args } => {
+                let mut operands = Vec::with_capacity(args.len() + 1);
+                operands.push(name);
+                for arg in args {
+                    operands.push(self.lower_expr(arg, instructions));
+                }
+
+                let temp = format!("t{}", instructions.len());
+                instructions.push(Instruction {
+                    opcode: OpCode::Call,
+                    operands,
+                    result: Some(temp.clone()),
+                    intents: vec![],
+                    profile: ProfileData::new(),
+                });
+                temp
+            }
+
             Expr::Binary { left, op, right } => {
                 let l = self.lower_expr(*left, instructions);
                 let r = self.lower_expr(*right, instructions);

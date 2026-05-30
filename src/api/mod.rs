@@ -305,7 +305,9 @@ impl NyxCompiler {
                 // Add general optimization opportunities
                 if !hot_instructions.is_empty() {
                     optimization_opportunities.push("loop_unrolling".to_string());
-                    optimization_opportunities.push("instruction_scheduling".to_string());
+                    optimization_opportunities.push("common_subexpression_elimination".to_string());
+                    optimization_opportunities.push("peephole".to_string());
+                    optimization_opportunities.push("vectorize".to_string());
                 }
                 
                 AnalysisResult {

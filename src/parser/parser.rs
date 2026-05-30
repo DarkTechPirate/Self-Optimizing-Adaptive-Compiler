@@ -127,11 +127,11 @@ impl Parser {
 
         self.advance(); // in
 
-        let start = self.parse_primary();
+        let start = self.parse_unary();
 
         self.advance(); // ..
 
-        let end = self.parse_primary();
+        let end = self.parse_unary();
 
         self.advance(); // {
         let body = self.parse_block();
@@ -174,6 +174,9 @@ impl Parser {
             self.advance(); // =
             let value = self.parse_expr();
             Stmt::Assign { name, value }
+        } else if *self.current() == Token::LParen {
+            let args = self.parse_call_args();
+            Stmt::Expr(Expr::Call { name, args })
         } else {
             // It's an expression starting with identifier
             Stmt::Expr(Expr::Identifier(name))
@@ -235,14 +238,14 @@ impl Parser {
     }
 
     fn parse_multiplicative(&mut self) -> Expr {
-        let mut left = self.parse_primary();
+        let mut left = self.parse_unary();
 
         loop {
             match self.current() {
                 Token::Star | Token::Slash => {
                     let op = if *self.current() == Token::Star { "*" } else { "/" }.to_string();
                     self.advance();
-                    let right = self.parse_primary();
+                    let right = self.parse_unary();
                     left = Expr::Binary {
                         left: Box::new(left),
                         op,
@@ -256,6 +259,28 @@ impl Parser {
         left
     }
 
+    fn parse_unary(&mut self) -> Expr {
+        match self.current() {
+            Token::Minus => {
+                self.advance();
+                let expr = self.parse_unary();
+                Expr::Unary {
+                    op: "-".to_string(),
+                    expr: Box::new(expr),
+                }
+            }
+            Token::Plus => {
+                self.advance();
+                let expr = self.parse_unary();
+                Expr::Unary {
+                    op: "+".to_string(),
+                    expr: Box::new(expr),
+                }
+            }
+            _ => self.parse_primary(),
+        }
+    }
+
     fn parse_primary(&mut self) -> Expr {
         match self.current() {
             Token::Number(n) => {
@@ -266,7 +291,12 @@ impl Parser {
             Token::Identifier(name) => {
                 let n = name.clone();
                 self.advance();
-                Expr::Identifier(n)
+                if *self.current() == Token::LParen {
+                    let args = self.parse_call_args();
+                    Expr::Call { name: n, args }
+                } else {
+                    Expr::Identifier(n)
+                }
             }
             Token::LParen => {
                 self.advance(); // (
@@ -276,5 +306,33 @@ impl Parser {
             }
             _ => panic!("Unexpected token in expression: {:?}", self.current()),
         }
+    }
+
+    fn parse_call_args(&mut self) -> Vec<Expr> {
+        let mut args = Vec::new();
+        self.advance(); // (
+
+        if *self.current() == Token::RParen {
+            self.advance();
+            return args;
+        }
+
+        loop {
+            let expr = self.parse_expr();
+            args.push(expr);
+
+            match self.current() {
+                Token::Comma => {
+                    self.advance();
+                }
+                Token::RParen => {
+                    self.advance();
+                    break;
+                }
+                _ => panic!("Unexpected token in call arguments: {:?}", self.current()),
+            }
+        }
+
+        args
     }
 }

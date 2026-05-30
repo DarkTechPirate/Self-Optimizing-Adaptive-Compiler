@@ -24,6 +24,16 @@ pub struct StrategyScore {
     pub sample_count: usize,
     pub history_score: f64,
     pub llm_confidence: f64,
+    #[serde(default)]
+    pub speed_score: f64,
+    #[serde(default)]
+    pub memory_score: f64,
+    #[serde(default)]
+    pub cost_score: f64,
+    #[serde(default)]
+    pub cache_boost: f64,
+    #[serde(default)]
+    pub reason: String,
     pub score: f64,
 }
 
@@ -33,6 +43,12 @@ pub struct StrategyDecision {
     pub selected_strategies: Vec<String>,
     pub strategy_scores: Vec<StrategyScore>,
     pub reused_history: bool,
+    #[serde(default)]
+    pub program_cached_strategies: Vec<String>,
+    #[serde(default)]
+    pub program_cache_hit: bool,
+    #[serde(default)]
+    pub retained_history_events: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,7 +186,13 @@ pub fn normalize_strategy(strategy: &str) -> String {
     } else if compact.contains("inline") {
         "inline_function".to_string()
     } else if compact.contains("unroll") {
-        "unroll_loop".to_string()
+        "loop_unrolling".to_string()
+    } else if compact.contains("cse") || compact.contains("common_subexpression") {
+        "common_subexpression_elimination".to_string()
+    } else if compact.contains("peephole") {
+        "peephole".to_string()
+    } else if compact.contains("vector") || compact.contains("simd") {
+        "vectorize".to_string()
     } else {
         compact
     }
@@ -183,21 +205,35 @@ pub fn mode_default_strategies(mode: &str) -> Vec<String> {
             "dead_code_elimination".to_string(),
             "loop_invariant_motion".to_string(),
             "strength_reduction".to_string(),
+            "common_subexpression_elimination".to_string(),
+            "peephole".to_string(),
+            "loop_unrolling".to_string(),
+            "inline_function".to_string(),
+            "vectorize".to_string(),
         ],
         "memory" => vec![
             "dead_code_elimination".to_string(),
             "constant_propagation".to_string(),
+            "peephole".to_string(),
+            "common_subexpression_elimination".to_string(),
         ],
         "auto" => vec![
             "constant_propagation".to_string(),
             "dead_code_elimination".to_string(),
             "loop_invariant_motion".to_string(),
             "strength_reduction".to_string(),
+            "common_subexpression_elimination".to_string(),
+            "peephole".to_string(),
+            "loop_unrolling".to_string(),
+            "inline_function".to_string(),
+            "vectorize".to_string(),
         ],
         _ => vec![
             "constant_propagation".to_string(),
             "dead_code_elimination".to_string(),
             "loop_invariant_motion".to_string(),
+            "common_subexpression_elimination".to_string(),
+            "peephole".to_string(),
         ],
     }
 }
@@ -217,7 +253,13 @@ pub fn select_strategies(
     features: &ProgramFeatures,
     history: &[LearningEvent],
     threshold: f64,
+    mode: &str,
+    program_hash: &str,
 ) -> StrategyDecision {
+    let retained_history = retain_history(history);
+    let program_cached = build_program_cache(&retained_history, program_hash, 3);
+    let cache_boosts = cache_boosts(&program_cached);
+
     let normalized_defaults: Vec<String> = mode_defaults
         .iter()
         .map(|s| normalize_strategy(s))
@@ -232,17 +274,21 @@ pub fn select_strategies(
 
     let mut candidates: HashSet<String> = normalized_defaults.iter().cloned().collect();
     candidates.extend(llm_confidence.keys().cloned());
+    candidates.extend(program_cached.iter().cloned());
 
     let mut strategy_scores = Vec::new();
     for candidate in candidates {
         let llm = *llm_confidence.get(&candidate).unwrap_or(&0.0);
         let is_default = normalized_defaults.contains(&candidate);
+        let cache_boost = *cache_boosts.get(&candidate).unwrap_or(&0.0);
         strategy_scores.push(score_strategy(
             &candidate,
             llm,
             is_default,
             features,
-            history,
+            &retained_history,
+            mode,
+            cache_boost,
         ));
     }
 
@@ -274,6 +320,10 @@ pub fn select_strategies(
             .any(|score| score.strategy == *selected && score.sample_count > 0)
     });
 
+    let program_cache_hit = selected_strategies
+        .iter()
+        .any(|strategy| program_cached.contains(strategy));
+
     StrategyDecision {
         candidate_strategies: strategy_scores
             .iter()
@@ -282,6 +332,9 @@ pub fn select_strategies(
         selected_strategies,
         strategy_scores,
         reused_history,
+        program_cached_strategies: program_cached,
+        program_cache_hit,
+        retained_history_events: retained_history.len(),
     }
 }
 
@@ -417,6 +470,8 @@ fn score_strategy(
     is_mode_default: bool,
     target_features: &ProgramFeatures,
     history: &[LearningEvent],
+    mode: &str,
+    cache_boost: f64,
 ) -> StrategyScore {
     let mut matched_speedups = Vec::new();
     let mut weighted_speedup_sum = 0.0;
@@ -439,9 +494,24 @@ fn score_strategy(
     }
 
     let sample_count = matched_speedups.len();
+    let (speed_score, memory_score, cost_reason) = cost_model_scores(strategy, target_features, mode);
+    let cost_score = combine_cost_scores(speed_score, memory_score, mode);
+
     if sample_count == 0 {
         let prior = if is_mode_default { 0.42 } else { 0.28 };
-        let score = (prior + 0.30 * llm_confidence).clamp(0.0, 1.0);
+        let score = (
+            (0.45 * prior)
+                + (0.30 * cost_score)
+                + (0.20 * llm_confidence)
+                + cache_boost
+        )
+            .clamp(0.0, 1.0);
+
+        let reason = format!(
+            "prior={:.2}, llm={:.2}, cost={:.2} ({}), cache={:.2}",
+            prior, llm_confidence, cost_score, cost_reason, cache_boost
+        );
+
         return StrategyScore {
             strategy: strategy.to_string(),
             avg_speedup: 1.0,
@@ -449,6 +519,11 @@ fn score_strategy(
             sample_count,
             history_score: prior,
             llm_confidence,
+            speed_score,
+            memory_score,
+            cost_score,
+            cache_boost,
+            reason,
             score,
         };
     }
@@ -475,7 +550,19 @@ fn score_strategy(
         (0.55 * speed_component) + (0.25 * consistency) + (0.20 * sample_component);
 
     let mode_boost = if is_mode_default { 0.10 } else { 0.0 };
-    let score = ((history_score * 0.70) + (llm_confidence * 0.20) + mode_boost).clamp(0.0, 1.0);
+    let score = (
+        (history_score * 0.55)
+            + (llm_confidence * 0.20)
+            + (cost_score * 0.20)
+            + mode_boost
+            + cache_boost
+    )
+        .clamp(0.0, 1.0);
+
+    let reason = format!(
+        "history={:.2}, llm={:.2}, cost={:.2} ({}), cache={:.2}",
+        history_score, llm_confidence, cost_score, cost_reason, cache_boost
+    );
 
     StrategyScore {
         strategy: strategy.to_string(),
@@ -484,8 +571,140 @@ fn score_strategy(
         sample_count,
         history_score,
         llm_confidence,
+        speed_score,
+        memory_score,
+        cost_score,
+        cache_boost,
+        reason,
         score,
     }
+}
+
+fn cost_model_scores(strategy: &str, features: &ProgramFeatures, mode: &str) -> (f64, f64, String) {
+    let has_loop = features.has_loop;
+    let op_scale = (features.num_operations as f64 / 50.0).clamp(0.0, 1.0);
+    let repeated = (features.repeated_expressions as f64 / 8.0).clamp(0.0, 1.0);
+
+    let (mut speed_score, mut memory_score) = match strategy {
+        "constant_propagation" => (0.60, 0.90),
+        "dead_code_elimination" => (0.55, 0.95),
+        "loop_invariant_motion" => (if has_loop { 0.70 } else { 0.35 }, 0.70),
+        "strength_reduction" => (if features.num_operations > 0 { 0.65 } else { 0.40 }, 0.75),
+        "common_subexpression_elimination" => (0.55 + 0.25 * repeated, 0.75),
+        "peephole" => (0.45 + 0.15 * op_scale, 0.90),
+        "loop_unrolling" => (if has_loop { 0.72 } else { 0.40 }, 0.35),
+        "inline_function" => (0.55, 0.40),
+        "vectorize" => (if has_loop && features.num_operations > 8 { 0.68 } else { 0.30 }, 0.40),
+        _ => (0.45, 0.60),
+    };
+
+    let size_penalty = match strategy {
+        "loop_unrolling" | "inline_function" | "vectorize" => 0.20 * op_scale,
+        _ => 0.05 * op_scale,
+    };
+    memory_score = (memory_score - size_penalty).clamp(0.0, 1.0);
+
+    if mode == "memory" {
+        speed_score = (speed_score * 0.90).clamp(0.0, 1.0);
+    }
+
+    let reason = format!(
+        "speed={:.2}, memory={:.2}",
+        speed_score, memory_score
+    );
+
+    (speed_score, memory_score, reason)
+}
+
+fn combine_cost_scores(speed_score: f64, memory_score: f64, mode: &str) -> f64 {
+    let (speed_weight, memory_weight) = match mode {
+        "speed" => (0.70, 0.30),
+        "memory" => (0.35, 0.65),
+        "balanced" => (0.55, 0.45),
+        _ => (0.60, 0.40),
+    };
+
+    (speed_weight * speed_score + memory_weight * memory_score).clamp(0.0, 1.0)
+}
+
+fn retain_history(history: &[LearningEvent]) -> Vec<LearningEvent> {
+    const MAX_HISTORY_EVENTS: usize = 1500;
+    const MAX_PROGRAM_EVENTS: usize = 40;
+    const MAX_HISTORY_AGE_SECS: u64 = 60 * 60 * 24 * 30;
+
+    let now = unix_timestamp_now();
+    let min_timestamp = now.saturating_sub(MAX_HISTORY_AGE_SECS);
+
+    let mut per_program_counts: HashMap<String, usize> = HashMap::new();
+    let mut retained_rev = Vec::new();
+
+    for event in history.iter().rev() {
+        if retained_rev.len() >= MAX_HISTORY_EVENTS {
+            break;
+        }
+
+        if event.timestamp_unix < min_timestamp {
+            continue;
+        }
+
+        let count = per_program_counts.entry(event.program_hash.clone()).or_insert(0);
+        if *count >= MAX_PROGRAM_EVENTS {
+            continue;
+        }
+
+        *count += 1;
+        retained_rev.push(event.clone());
+    }
+
+    retained_rev.reverse();
+    retained_rev
+}
+
+fn build_program_cache(
+    history: &[LearningEvent],
+    program_hash: &str,
+    top_n: usize,
+) -> Vec<String> {
+    let mut score_map: HashMap<String, (f64, usize)> = HashMap::new();
+
+    for event in history {
+        if event.program_hash != program_hash {
+            continue;
+        }
+
+        let mut seen = HashSet::new();
+        for pass in &event.applied_passes {
+            let strategy = normalize_applied_pass(pass);
+            if !seen.insert(strategy.clone()) {
+                continue;
+            }
+            let entry = score_map.entry(strategy).or_insert((0.0, 0));
+            entry.0 += event.speedup;
+            entry.1 += 1;
+        }
+    }
+
+    let mut ranked: Vec<(String, f64)> = score_map
+        .into_iter()
+        .map(|(strategy, (sum, count))| (strategy, if count > 0 { sum / count as f64 } else { 0.0 }))
+        .collect();
+
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.into_iter().take(top_n).map(|(s, _)| s).collect()
+}
+
+fn cache_boosts(cached: &[String]) -> HashMap<String, f64> {
+    let mut boosts = HashMap::new();
+    for (idx, strategy) in cached.iter().enumerate() {
+        let boost = match idx {
+            0 => 0.12,
+            1 => 0.08,
+            2 => 0.05,
+            _ => 0.02,
+        };
+        boosts.insert(strategy.clone(), boost);
+    }
+    boosts
 }
 
 fn feature_similarity(a: &ProgramFeatures, b: &ProgramFeatures) -> f64 {
