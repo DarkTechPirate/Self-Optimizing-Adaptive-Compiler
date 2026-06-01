@@ -5,14 +5,14 @@ Nyx is a self-learning runtime that automatically makes your code faster over ti
 Short version: your code gets faster every time it runs.
 
 ## What it is
-Nyx profiles real execution, selects optimization strategies automatically, and reuses what previously worked. It targets a Nyx DSL and simple Python inputs.
+Nyx profiles real execution, selects optimization strategies automatically, and reuses what previously worked. It targets a Nyx DSL and small Python or C++ inputs that fit the supported subset.
 
 ## What it does
 - Profiles execution in real time
 - Selects optimization strategies automatically (`--mode auto`)
 - Learns from previous runs and reuses successful strategies
 - Tracks saved time and exposes it in API and dashboard
-- Accepts Nyx DSL and simple Python input
+- Accepts Nyx DSL plus simple Python and C++ input
 
 ## Tech stack
 - Rust core (`nyx` crate) with CLI via `clap` and JSON output via `serde` / `serde_json`
@@ -33,6 +33,16 @@ cargo build --release
 ./target/release/nyx analyze samples/redundant_hotpath.nyx --no-llm
 ./target/release/nyx optimize samples/redundant_hotpath.nyx --mode auto --no-llm
 ./target/release/nyx serve --host 127.0.0.1 --port 8090
+```
+
+You can also point the CLI at small Python or C++ inputs that fit the supported subset and Nyx will normalize them into its internal pipeline.
+
+Examples:
+```bash
+./target/release/nyx run samples/redundant_hotpath.nyx --no-llm
+./target/release/nyx run samples/redundant_hotpath.py --no-llm
+# or any small .cpp file that fits the supported subset
+./target/release/nyx run path/to/your_example.cpp --no-llm
 ```
 
 Dashboard:

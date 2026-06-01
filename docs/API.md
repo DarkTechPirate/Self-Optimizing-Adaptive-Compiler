@@ -24,8 +24,8 @@ nyx serve --host 127.0.0.1 --port 8090
 ```
 
 ## Optimize response highlights
-- `input_format`: `nyx` or `python`
-- `source_normalized`: true when Python is normalized to Nyx syntax
+- `input_format`: `nyx`, `python`, or `cpp`
+- `source_normalized`: true when Python or C++ is normalized to Nyx syntax
 - `selected_strategies`
 - `strategy_scores`
 - `reused_history`
